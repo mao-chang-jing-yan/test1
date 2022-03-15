@@ -1,0 +1,21 @@
+{
+  "name": "test1",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "Blob": "^0.10.0",
+    "crypto-js": "^4.1.1"
+  },
+  "dependencies": {
+    "async": "^3.2.3",
+    "debug": "^4.3.3",
+    "modbus-serial": "^8.0.5"
+  }
+}

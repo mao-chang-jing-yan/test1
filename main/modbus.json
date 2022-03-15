@@ -1,0 +1,125 @@
+{
+    "server": {
+        "mode": "tcp",
+        "logLevel": "debug",
+        "keepalive": {
+            "mode": "tcp",
+            "enable": false,
+            "options": {
+                "timeout": 5,
+                "intervalTime": 3
+            }
+        }
+    },
+    "mqtt": {
+        "host": "192.168.2.85",
+        "port": "1883",
+        "options": {
+            "username": "root",
+            "password": "root"
+        },
+        "getTopic": {
+            "topic": "/cloudred/modbus/{clientKey}/{devKey}/get",
+            "options": {
+                "qos": 0
+            }
+        },
+        "statusTopic": {
+            "topic": "/cloudred/modbus/{clientKey}/{devKey}/status",
+            "options": {
+                "qos": 2
+            }
+        },
+        "setTopic": {
+            "topic": "/cloudred/modbus/{clientKey}/{devKey}/set",
+            "options": {
+                "qos": 0
+            }
+        }
+    },
+    "deviceConfig": [
+        {
+            "clientKey": "3030303466666662",
+            "slaveId": [
+                2,1
+
+
+            ],
+            "template": "template2"
+        },
+        {
+            "clientKey": "0003fffc55aa5500258003a8",
+            "slaveId": [
+                2,1,3
+            ],
+            "template": "template1"
+        },
+        {
+            "clientKey": "0001fffe",
+            "slaveId": [
+                2,1
+            ],
+            "template": "template1"
+        }
+    ],
+    "templateConfig": {
+        "template1": [
+            {
+                "pointName": "temperature",
+                "functionCode": 3,
+                "interval": 1,
+                "args": {
+                    "dataType": "int16",
+                    "byteOrder": "big", 
+                    "quantity": 2,
+                    "offsetAddress": 0
+                }
+            },
+            {
+                "pointName": "humidity",
+                "functionCode": 3,
+                "interval": 3,
+                "args": {
+                    "dataType": "float",
+                    "quantity": 1,
+                    "offsetAddress": 2
+                }
+            }
+        ],
+        "template2": [
+            {
+                "pointName": "humidity",
+                "interval": 2,
+                "functionCode": 2,
+                
+                "args": {
+                    "quantity": 1,
+                    "dataType": "int32",
+                    "offsetAddress": 2
+                }
+            },
+            {
+                "pointName": "test",
+                "interval": 3,
+                "functionCode": 4,
+                
+                "args": {
+                    "quantity": 1,
+                    "dataType": "float",
+                    "offsetAddress": 4
+                }
+            },
+            {
+                "pointName": "coiltest",
+                "interval": 5,
+                "functionCode": 4,
+                
+                "args": {
+                    "quantity": 3,
+                    "dataType": "bit",
+                    "offsetAddress": 2
+                }
+            }
+        ]
+    }
+}
