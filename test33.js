@@ -199,42 +199,60 @@ class FlowVariant {
         // 需要更新的case
         this.update.caseMap = res.updateCaseMap;
 
-        // 有变化的case（变化之后）仅需要路径
-        let newCaseMapTmp = this.mapAdd({}, this.insert.caseMap);
-        newCaseMapTmp = this.mapAdd(newCaseMapTmp, this.update.caseMap);
-        // 数据库中存在的case 仅需要路径
-        let oldCaseMapTmp = this.mapAdd({}, newCaseMapTmp);
-        oldCaseMapTmp = this.mapAdd(oldCaseMapTmp, this.caseMap_);
 
-        // case变化之后变体
+        // 有变化的case（变化之后）仅需要路径
+        let newCaseMapTmp = this.mapAdd(this.update.caseMap, this.insert.caseMap);
+        // 数据库中存在的case 仅需要路径
+        let oldCaseMapTmp = this.mapAdd({}, this.caseMap_);
+        // oldCaseMapTmp = this.mapAdd(oldCaseMapTmp, this.caseMap_);
+
+        // 需要查询的case变化之后变体
+
         this.variantMap = await this._variantMap(newCaseMapTmp);
-        // case变化之前变体
-        this.variantMap_ = await this._variantMap(oldCaseMapTmp);
+        // 需要查询的case变化之前变体
+        let variantMap_ = await this.getVariantPathFromCaseMap(oldCaseMapTmp);
         // this.update.variantMap = await this._variantMap(this.update.caseMap);
         // 需要查询的变体
-        let oldVariantMap = this.mapAdd({}, this.variantMap);
-        oldVariantMap = this.mapAdd(oldVariantMap, this.variantMap_);
+        let oldVariantMap = this.mapAdd(variantMap_, this.variantMap);
 
-        // 查询数据库中是否以存在这些变体
-        let m1 = await this.getVariantMap_(oldVariantMap);
+        // 查询数据库中的变体信息
+        let m1 = await this.getVariantMapWithPaths_(Object.keys(oldVariantMap));
         // this.variantMap_ = m1.variantMap_;
         // this.variantNameMap_ = m1.nameMap_;
         // this.variantPathMap_ = m1.pathMap_;
 
 
-        await this.checkVariantMap();
+        res = await this.checkVariantMap(this.variantMap, m1);
+        this.insert.variantMap = res.insertVariantMap;
+        this.update.variantMap = res.updateVariantMap;
 
         // 重命名变体名称
         this._reNameVariantName();
     }
 
-    async mapAdd(map1, map2) {
-        for (const map2Key in map2) {
-            if (map2.hasOwnProperty(map2Key)) {
-                map1[map2Key] = map2[map2Key]
+    getVariantPathFromCaseMap(caseMap){
+        let m = {}
+        for (const caseMapKey in caseMap) {
+            if (caseMap.hasOwnProperty(caseMapKey)){
+                let key = listToStr(caseMap[caseMapKey].path_names);
+                m[key] = 1
             }
         }
-        return map1;
+        return m;
+    }
+    mapAdd(map1, map2) {
+        let m = {}
+        for (const map2Key in map1) {
+            if (map1.hasOwnProperty(map2Key)) {
+                m[map2Key] = map1[map2Key]
+            }
+        }
+        for (const map2Key in map2) {
+            if (map2.hasOwnProperty(map2Key)) {
+                m[map2Key] = map2[map2Key]
+            }
+        }
+        return m;
     }
 
     async checkCaseMap(caseMap, caseMap_) {
@@ -323,15 +341,22 @@ class FlowVariant {
     }
 
 
-    async checkVariantMap() {
-        for (const variantPath in this.variantMap) {
-            if (this.variantMap.hasOwnProperty(variantPath)) {
-                if (!this.variantPathMap_[variantPath]) {
-                    this.variantMap.insert = true;
+    async checkVariantMap(variantMap, m) {
+        let insertVariantM = {};
+        let updateVariantM = {};
+        let variantMap_ = m.variantMap_;
+        let variantNameMap_ = m.nameMap_;
+        let variantPathMap_ = m.pathMap_;
+
+        for (const variantPath in variantMap) {
+            if (variantMap.hasOwnProperty(variantPath)) {
+                if (!variantPathMap_[variantPath]) {
+                    variantMap[variantPath].insert = true;
+                    insertVariantM[variantPath] = variantMap[variantPath];
                     continue
                 }
-                let oldVariant = this.variantMap_[variantPath];
-                let newVariant = this.variantMap[variantPath];
+                let oldVariant = JSON.parse(JSON.stringify(variantMap_[variantPath]));
+                let newVariant = JSON.parse(JSON.stringify(variantMap[variantPath]));
                 // {
                 //     id: "",
                 //     FlowCode: "",
@@ -342,7 +367,7 @@ class FlowVariant {
                 //     minFlowCase: "",
                 //     minTime: ""
                 // }
-                oldVariant.update = true
+                oldVariant.update = true;
                 oldVariant.flowCaseCount += newVariant.flowCaseCount;
                 if (oldVariant.maxTime < newVariant.maxTime) {
                     oldVariant.maxTime = newVariant.maxTime;
@@ -352,7 +377,12 @@ class FlowVariant {
                     oldVariant.minTime = newVariant.minTime;
                     oldVariant.minFlowCase = newVariant.minFlowCase;
                 }
+                updateVariantM[variantPath] = oldVariant;
             }
+        }
+        return {
+            insertVariantMap: insertVariantM,
+            updateVariantMap: updateVariantM,
         }
     }
 
@@ -367,11 +397,11 @@ class FlowVariant {
         return caseM
     }
 
-    async getVariantMap_(variantMap = {}) {
+    async getVariantMapWithPaths_(paths = []) {
         let nameM = {};
         let pathM = {};
         let variantM = {};
-        let data = await getWithPath(this.flowCode, Object.keys(variantMap));
+        let data = await getWithPath(this.flowCode, paths);
         for (let i = 0; i < data.length; i++) {
             let pathStr = data[i].pathStr;
             let flowVariant = data[i].flowVariant
