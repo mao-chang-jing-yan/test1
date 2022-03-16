@@ -194,25 +194,47 @@ class FlowVariant {
         this.caseMap_ = await this.getCaseMap_(this.caseMap);
         // 检查caseMap是否需要更新
         let res = await this.checkCaseMap(this.caseMap, this.caseMap_);
+        // 需要插入的case
         this.insert.caseMap = res.insertCaseMap;
+        // 需要更新的case
         this.update.caseMap = res.updateCaseMap;
 
-        // 1, 处理需要插入的
+        // 有变化的case（变化之后）仅需要路径
+        let newCaseMapTmp = this.mapAdd({}, this.insert.caseMap);
+        newCaseMapTmp = this.mapAdd(newCaseMapTmp, this.update.caseMap);
+        // 数据库中存在的case 仅需要路径
+        let oldCaseMapTmp = this.mapAdd({}, newCaseMapTmp);
+        oldCaseMapTmp = this.mapAdd(oldCaseMapTmp, this.caseMap_);
 
-        // 新增数据的变体map
-        this.variantMap = await this._variantMap(this.caseMap);
+        // case变化之后变体
+        this.variantMap = await this._variantMap(newCaseMapTmp);
+        // case变化之前变体
+        this.variantMap_ = await this._variantMap(oldCaseMapTmp);
+        // this.update.variantMap = await this._variantMap(this.update.caseMap);
+        // 需要查询的变体
+        let oldVariantMap = this.mapAdd({}, this.variantMap);
+        oldVariantMap = this.mapAdd(oldVariantMap, this.variantMap_);
 
-        let m = await this.getVariantMap_(this.variantMap);
-
-        this.variantMap_ = m.variantMap_;
-        this.variantNameMap_ = m.nameMap_;
-        this.variantPathMap_ = m.pathMap_;
+        // 查询数据库中是否以存在这些变体
+        let m1 = await this.getVariantMap_(oldVariantMap);
+        // this.variantMap_ = m1.variantMap_;
+        // this.variantNameMap_ = m1.nameMap_;
+        // this.variantPathMap_ = m1.pathMap_;
 
 
         await this.checkVariantMap();
 
         // 重命名变体名称
         this._reNameVariantName();
+    }
+
+    async mapAdd(map1, map2) {
+        for (const map2Key in map2) {
+            if (map2.hasOwnProperty(map2Key)) {
+                map1[map2Key] = map2[map2Key]
+            }
+        }
+        return map1;
     }
 
     async checkCaseMap(caseMap, caseMap_) {
@@ -222,19 +244,82 @@ class FlowVariant {
             if (caseMap.hasOwnProperty(flowCase)) {
                 if (!caseMap_.hasOwnProperty(flowCase)) {
                     // insert
+                    caseMap[flowCase].insert = true;
                     insertCaseM[flowCase] = caseMap[flowCase];
                     delete caseMap[flowCase];
                     continue
                 }
                 // update
-                updateCaseM[flowCase] = caseMap[flowCase];
+
+                // path_ids: [item.id],
+                // // 不变
+                // flowCode: item.flowCode,
+                // flowCase: flowCase,
+                //
+                // // 变化
+                // startActivity: item.activity,
+                // startTime: item.activityTime,
+                // path_names: [item.activity],
+                // path: [item],
+                // time: 0,
+                // endActivity: null,
+                // endTime: item.activityTime,
+                // isReWork: false,
+                let oldCaseItem = JSON.parse(JSON.stringify(caseMap_[flowCase]));
+                let newCaseItem = caseMap[flowCase];
+
+                oldCaseItem.update = true;
+                oldCaseItem.path_ids = oldCaseItem.pathIdStr.split(";");
+                oldCaseItem.path_names = oldCaseItem.pathStr.split(";");
+                oldCaseItem.path_times = oldCaseItem.pathTimeStr.split(";");
+                if (this.getTimeStamp(newCaseItem.startTime) < this.getTimeStamp(oldCaseItem.startTime)) {
+                    oldCaseItem.startTime = newCaseItem.startTime;
+                    oldCaseItem.startActivity = newCaseItem.startActivity;
+                }
+                if (this.getTimeStamp(newCaseItem.endTime) > this.getTimeStamp(oldCaseItem.endTime)) {
+                    oldCaseItem.endTime = newCaseItem.endTime;
+                    oldCaseItem.endActivity = newCaseItem.endActivity;
+                }
+                oldCaseItem.time = this.getTimeStamp(oldCaseItem.endTime) - this.getTimeStamp(oldCaseItem.startTime);
+                for (let i = 0; i < newCaseItem.path_names.length; i++) {
+                    if (oldCaseItem.isReWork) {
+                        break;
+                    }
+                    oldCaseItem.isReWork = oldCaseItem.isReWork || newCaseItem.isReWork || oldCaseItem.path_names.includes(newCaseItem.path_names[i]);
+                }
+                // await this.__insert(oldCaseItem, newCaseItem);
+
+
+                updateCaseM[flowCase] = oldCaseItem;
                 delete caseMap[flowCase];
             }
         }
-        return{
+        return {
             insertCaseMap: insertCaseM,
             updateCaseMap: updateCaseM,
         }
+    }
+
+    async __insert(oldCaseItem, newCaseItem) {
+        let i = 0, j = 0;
+        while (i < oldCaseItem.path_times.length && j < newCaseItem.path.length) {
+            let time1 = oldCaseItem.path_times[i];
+            let time2 = newCaseItem.path[j].activityTime;
+            if (this.getTimeStamp(time1) < this.getTimeStamp(time2)) {
+                i++;
+                continue;
+            }
+            if (this.getTimeStamp(time1) > this.getTimeStamp(time2)) {
+                j++;
+            }
+        }
+        // for (let i = 0; i < oldCaseItem.path_times.length; i++) {
+        //     for (let j = 0; j < newCaseItem.path.length; j++) {
+        //
+        //     }
+        //
+        // }
+
     }
 
 
