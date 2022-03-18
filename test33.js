@@ -151,18 +151,19 @@ class FlowVariant {
     init(flowCode) {
         this.flowCode = flowCode;
         this.index = 0;
-        this._initTableList();
 
         this.insert = {
             caseMap: {},
             variantMap: {},
             activities: [],
+            tables: this._initTableList(),
         }
 
         this.update = {
             caseMap: {},
             variantMap: {},
             activities: [],
+            tables: this._initTableList(),
         }
 
         // 新增的
@@ -186,63 +187,104 @@ class FlowVariant {
 
     // 处理数据
     async handleData(data) {
+        // await this.init(this.flowCode);
         // 获取新增变体名称的id的起始值
+        // node.error([123]);
         this.index = await getMaxVariantName(this.flowCode) + 1;
         // 处理新增的数据得到caseMap
         this.caseMap = await this._caseMap(data);
+        node.error(["this.caseMap", this.caseMap, Object.keys(this.caseMap)]);
+
         // 原始数据的caseMap
-        this.caseMap_ = await this.getCaseMap_(this.caseMap);
+        this.caseMap_ = await this.getCaseMap_(Object.keys(this.caseMap));
+        node.error(["this.caseMap_", this.caseMap_, Object.keys(this.caseMap_)]);
         // 检查caseMap是否需要更新
         let res = await this.checkCaseMap(this.caseMap, this.caseMap_);
+        node.error(["checkCaseMap", res]);
         // 需要插入的case
         this.insert.caseMap = res.insertCaseMap;
         // 需要更新的case
         this.update.caseMap = res.updateCaseMap;
 
-        // 有变化的case（变化之后）仅需要路径
-        let newCaseMapTmp = this.mapAdd({}, this.insert.caseMap);
-        newCaseMapTmp = this.mapAdd(newCaseMapTmp, this.update.caseMap);
-        // 数据库中存在的case 仅需要路径
-        let oldCaseMapTmp = this.mapAdd({}, newCaseMapTmp);
-        oldCaseMapTmp = this.mapAdd(oldCaseMapTmp, this.caseMap_);
 
-        // case变化之后变体
+        // 有变化的case（变化之后）仅需要路径
+        let newCaseMapTmp = this.mapAdd(this.update.caseMap, this.insert.caseMap);
+        // node.error(["newCaseMapTmp", newCaseMapTmp]);
+
+        // 数据库中存在的case 仅需要路径
+        let oldCaseMapTmp = this.mapAdd({}, this.caseMap_);
+        // oldCaseMapTmp = this.mapAdd(oldCaseMapTmp, this.caseMap_);
+        // node.error(["oldCaseMapTmp", oldCaseMapTmp]);
+
+        // 需要查询的case变化之后变体
+
         this.variantMap = await this._variantMap(newCaseMapTmp);
-        // case变化之前变体
-        this.variantMap_ = await this._variantMap(oldCaseMapTmp);
+        node.error(["this.variantMap", this.variantMap, Object.keys(this.variantMap)]);
+        // 需要查询的case变化之前变体
+        let variantMap_ = await this.getVariantPathFromCaseMap(oldCaseMapTmp);
         // this.update.variantMap = await this._variantMap(this.update.caseMap);
         // 需要查询的变体
-        let oldVariantMap = this.mapAdd({}, this.variantMap);
-        oldVariantMap = this.mapAdd(oldVariantMap, this.variantMap_);
-
-        // 查询数据库中是否以存在这些变体
-        let m1 = await this.getVariantMap_(oldVariantMap);
-        // this.variantMap_ = m1.variantMap_;
-        // this.variantNameMap_ = m1.nameMap_;
-        // this.variantPathMap_ = m1.pathMap_;
+        let oldVariantMap = this.mapAdd(variantMap_, this.variantMap);
+        node.error(["oldVariantMap", oldVariantMap, Object.keys(oldVariantMap)]);
 
 
-        await this.checkVariantMap();
+        // 查询数据库中的变体信息
+        let m1 = await this.getVariantMapWithPaths_(Object.keys(oldVariantMap));
+        node.error(["m1", m1]);
 
-        // 重命名变体名称
-        this._reNameVariantName();
+        this.variantMap_ = m1.variantMap_;
+        this.variantNameMap_ = m1.nameMap_;
+        this.variantPathMap_ = m1.pathMap_;
+
+
+        res = await this.checkVariantMap(this.variantMap, m1);
+        node.error(["res", res]);
+
+        this.insert.variantMap = res.insertVariantMap;
+        this.update.variantMap = res.updateVariantMap;
+
+        // // 重命名变体名称
+        this._reNameVariantName(this.insert.variantMap, this.variantMap_);
+
+        await this.handleInsertVariantMap(this.insert.variantMap, newCaseMapTmp, oldCaseMapTmp);
     }
 
-    async mapAdd(map1, map2) {
-        for (const map2Key in map2) {
-            if (map2.hasOwnProperty(map2Key)) {
-                map1[map2Key] = map2[map2Key]
+    getVariantPathFromCaseMap(caseMap) {
+        let m = {}
+        for (const caseMapKey in caseMap) {
+            if (caseMap.hasOwnProperty(caseMapKey)) {
+                let key = caseMap[caseMapKey].pathStr;
+                if (caseMap[caseMapKey].path_names) {
+                    key = listToStr(caseMap[caseMapKey].path_names);
+                }
+                m[key] = 1
             }
         }
-        return map1;
+        return m;
+    }
+
+    mapAdd(map1, map2) {
+        let m = {}
+        for (const map2Key in map1) {
+            if (map1.hasOwnProperty(map2Key)) {
+                m[map2Key] = map1[map2Key]
+            }
+        }
+        for (const map2Key in map2) {
+            if (map2.hasOwnProperty(map2Key)) {
+                m[map2Key] = map2[map2Key]
+            }
+        }
+        return m;
     }
 
     async checkCaseMap(caseMap, caseMap_) {
         let insertCaseM = {};
         let updateCaseM = {};
+        // node.error(["checkCaseMap", caseMap, caseMap_]);
         for (const flowCase in caseMap) {
             if (caseMap.hasOwnProperty(flowCase)) {
-                if (!caseMap_.hasOwnProperty(flowCase)) {
+                if (!caseMap_[flowCase]) {
                     // insert
                     caseMap[flowCase].insert = true;
                     insertCaseM[flowCase] = caseMap[flowCase];
@@ -269,9 +311,19 @@ class FlowVariant {
                 let newCaseItem = caseMap[flowCase];
 
                 oldCaseItem.update = true;
-                oldCaseItem.path_ids = oldCaseItem.pathIdStr.split(";");
+                // oldCaseItem.path_ids = oldCaseItem.pathIdStr.split(";");
                 oldCaseItem.path_names = oldCaseItem.pathStr.split(";");
                 oldCaseItem.path_times = oldCaseItem.pathTimeStr.split(";");
+
+                oldCaseItem.insertpath = [];
+                await this.__insert(oldCaseItem, newCaseItem);
+
+                if (!newCaseItem.insertpath || newCaseItem.insertpath.length <= 0) {
+                    // delete caseMap[flowCase];
+                    // continue
+                } else {
+                    node.error(["oldCaseItem.insertpath", oldCaseItem.insertpath]);
+                }
                 if (this.getTimeStamp(newCaseItem.startTime) < this.getTimeStamp(oldCaseItem.startTime)) {
                     oldCaseItem.startTime = newCaseItem.startTime;
                     oldCaseItem.startActivity = newCaseItem.startActivity;
@@ -281,17 +333,19 @@ class FlowVariant {
                     oldCaseItem.endActivity = newCaseItem.endActivity;
                 }
                 oldCaseItem.time = this.getTimeStamp(oldCaseItem.endTime) - this.getTimeStamp(oldCaseItem.startTime);
-                for (let i = 0; i < newCaseItem.path_names.length; i++) {
+                // if (listToStr(oldCaseItem.path_names, ";") === "审批通过;审批通过;订单创建" || listToStr(oldCaseItem.path_names, ";")=== "订单创建;审批通过;审批通过"){
+                //     node.error(["审批通过;审批通过;订单创建", caseMap_[flowCase], oldCaseItem, newCaseItem]);
+                // }
+                for (let i = 0; i < oldCaseItem.path_names.length; i++) {
                     if (oldCaseItem.isReWork) {
                         break;
                     }
                     oldCaseItem.isReWork = oldCaseItem.isReWork || newCaseItem.isReWork || oldCaseItem.path_names.includes(newCaseItem.path_names[i]);
                 }
-                // await this.__insert(oldCaseItem, newCaseItem);
 
 
                 updateCaseM[flowCase] = oldCaseItem;
-                delete caseMap[flowCase];
+                // delete caseMap[flowCase];
             }
         }
         return {
@@ -302,36 +356,65 @@ class FlowVariant {
 
     async __insert(oldCaseItem, newCaseItem) {
         let i = 0, j = 0;
-        while (i < oldCaseItem.path_times.length && j < newCaseItem.path.length) {
+        while (i <= oldCaseItem.path_times.length && j < newCaseItem.path.length) {
             let time1 = oldCaseItem.path_times[i];
             let time2 = newCaseItem.path[j].activityTime;
+            // node.error(["time ", time1, time2, this.getTimeStamp(time1), this.getTimeStamp(time2)]);
+            if (i === oldCaseItem.path_times.length) {
+                oldCaseItem.path_times.push(time2);
+                oldCaseItem.path_names.push(newCaseItem.path[j].activity);
+                oldCaseItem.insertpath.push(newCaseItem.path[j]);
+                i++;
+                j++;
+                continue
+            }
             if (this.getTimeStamp(time1) < this.getTimeStamp(time2)) {
                 i++;
-                continue;
+                continue
             }
             if (this.getTimeStamp(time1) > this.getTimeStamp(time2)) {
-                j++;
+                oldCaseItem.path_times.splice(i, 0, time2);
+                oldCaseItem.path_names.splice(i, 0, newCaseItem.path[j].activity);
+                oldCaseItem.insertpath.push(newCaseItem.path[j]);
+                j++
+            }
+            if (this.getTimeStamp(time1) === this.getTimeStamp(time2)) {
+                for (let k = j + 1; k < newCaseItem.path.length; k++) {
+                    if (this.getTimeStamp(time1) === this.getTimeStamp(newCaseItem.path[k].activityTime) && oldCaseItem.path_names[i] === newCaseItem.path[k].activity) {
+                        newCaseItem.path.splice(k, 1);
+                        // d.splice(k, 1);
+                    }
+                }
+                i++;
             }
         }
-        // for (let i = 0; i < oldCaseItem.path_times.length; i++) {
-        //     for (let j = 0; j < newCaseItem.path.length; j++) {
-        //
-        //     }
-        //
-        // }
+        if (newCaseItem.path.length > 0) {
+            newCaseItem.endTime = newCaseItem.path[newCaseItem.path.length - 1].activityTime;
+            newCaseItem.endActivity = newCaseItem.path[newCaseItem.path.length - 1].activity;
 
+            newCaseItem.startTime = newCaseItem.path[newCaseItem.path.length - 1].activityTime;
+            newCaseItem.startActivity = newCaseItem.path[newCaseItem.path.length - 1].activity;
+        }
+        // oldCaseItem.insertpath = newCaseItem.path[j];
     }
 
 
-    async checkVariantMap() {
-        for (const variantPath in this.variantMap) {
-            if (this.variantMap.hasOwnProperty(variantPath)) {
-                if (!this.variantPathMap_[variantPath]) {
-                    this.variantMap.insert = true;
+    async checkVariantMap(variantMap, m) {
+        let insertVariantM = {};
+        let updateVariantM = {};
+        let variantMap_ = m.variantMap_;
+        let variantNameMap_ = m.nameMap_;
+        let variantPathMap_ = m.pathMap_;
+
+        for (const variantPath in variantMap) {
+            if (variantMap.hasOwnProperty(variantPath)) {
+                if (!variantPathMap_[variantPath]) {
+                    variantMap[variantPath].insert = true;
+                    insertVariantM[variantPath] = variantMap[variantPath];
                     continue
                 }
-                let oldVariant = this.variantMap_[variantPath];
-                let newVariant = this.variantMap[variantPath];
+                let oldVariant = JSON.parse(JSON.stringify(variantMap_[variantPath]));
+                let newVariant = JSON.parse(JSON.stringify(variantMap[variantPath]));
                 // {
                 //     id: "",
                 //     FlowCode: "",
@@ -342,43 +425,83 @@ class FlowVariant {
                 //     minFlowCase: "",
                 //     minTime: ""
                 // }
-                oldVariant.update = true
-                oldVariant.flowCaseCount += newVariant.flowCaseCount;
+                if (oldVariant.flowCaseCount !== newVariant.flowCaseCount) {
+                    oldVariant.update = true;
+                    oldVariant.flowCaseCount = newVariant.flowCaseCount;
+                }
+
                 if (oldVariant.maxTime < newVariant.maxTime) {
+                    oldVariant.update = true;
                     oldVariant.maxTime = newVariant.maxTime;
                     oldVariant.maxFlowCase = newVariant.maxFlowCase;
                 }
                 if (oldVariant.minTime > newVariant.minTime) {
+                    oldVariant.update = true;
                     oldVariant.minTime = newVariant.minTime;
                     oldVariant.minFlowCase = newVariant.minFlowCase;
                 }
+                if (oldVariant.update) {
+                    updateVariantM[variantPath] = oldVariant;
+                }
             }
+        }
+        return {
+            insertVariantMap: insertVariantM,
+            updateVariantMap: updateVariantM,
         }
     }
 
 
-    async getCaseMap_(caseMap = {}) {
-        let caseM = {}
-        let data = await getCase(this.flowCode, Object.keys(caseMap));
+    async getCaseMap_(caseList = []) {
+        let caseM = {};
+        let data = await getCase(this.flowCode, caseList);
         for (let i = 0; i < data.length; i++) {
-            let flowCase = data[i].flowCase;
-            caseMap[flowCase] = data[i];
+            let dataItem = data[i];
+            // node.error([i, data[i], Object.keys(data[i].dataValues)]);
+            let flowCase = dataItem.flowCase;
+            if (flowCase && caseList.includes(flowCase)) {
+                caseM[flowCase] = dataItem;
+            }
         }
+        node.error([data.length]);
+
+
+        data = await getCaseWithActivity(this.flowCode, caseList);
+        node.error([data.length]);
+
+        for (let i = 0; i < data.length; i++) {
+            let dataItem = data[i];
+            // node.error([i, data[i], Object.keys(data[i].dataValues)]);
+            let flowCase = dataItem.flowCase;
+            if (flowCase && caseList.includes(flowCase)) {
+                caseM[flowCase].pathStr = dataItem.pathStr;
+                caseM[flowCase].pathTimeStr = dataItem.pathTimeStr;
+            }
+        }
+        node.error([Object.keys(caseM)]);
+        // node.error(["data - -- - ", data, caseM]);
         return caseM
     }
 
-    async getVariantMap_(variantMap = {}) {
+    async getVariantMapWithPaths_(paths = []) {
         let nameM = {};
         let pathM = {};
         let variantM = {};
-        let data = await getWithPath(this.flowCode, Object.keys(variantMap));
+        let data = await getWithPath(this.flowCode, JSON.parse(JSON.stringify(paths)));
+        node.error(["getVariantMapWithPaths_ paths", paths, data]);
         for (let i = 0; i < data.length; i++) {
             let pathStr = data[i].pathStr;
-            let flowVariant = data[i].flowVariant
-            nameM[flowVariant] = pathStr
-            pathM[pathStr] = flowVariant
+            let flowVariant = data[i].flowVariant;
+            // node.error(["flowVariant", pathStr, paths]);
+            if (flowVariant && paths.includes(pathStr)) {
+                nameM[flowVariant] = pathStr;
+                pathM[pathStr] = flowVariant;
+            }
         }
+
         data = await getFlowVariant(this.flowCode, Object.keys(nameM));
+        node.error(["getFlowVariant data", data]);
+
         for (let i = 0; i < data.length; i++) {
             let flowVariant = data[i].flowVariant;
             let pathStr = nameM[flowVariant];
@@ -448,11 +571,11 @@ class FlowVariant {
     // 初始化数据表
     _initTableList() {
         // 变体活动表
-        this.caseActivityList = [
+        let caseActivityList = [
             // {id: "", FlowCode: "", FlowVariant: "", activity: "", sequence: ""}
         ]
         // 变体案例表
-        this.variantCaseList = [
+        let variantCaseList = [
             // {
             //     id: "",
             //     FlowCode: "",
@@ -467,7 +590,7 @@ class FlowVariant {
             // }
         ]
         // 流程变体表
-        this.flowVariantList = [
+        let flowVariantList = [
             // {
             //     id: "",
             //     FlowCode: "",
@@ -480,14 +603,21 @@ class FlowVariant {
             // }
         ]
         // 流程活动表
-        this.flowActivityList = [
+        let flowActivityList = [
             // {id: "1", FlowCode: "", activity: ""},
         ]
 
         // 活动详情表
-        this.activityDetailList = [
+        let activityDetailList = [
             // {flowCode: "", flowVariant: "", flowCase: "", activity: "", activityTime: "", endActivity: "", endTime: "",}
         ]
+        return {
+            caseActivityList: caseActivityList,
+            variantCaseList: variantCaseList,
+            flowVariantList: flowVariantList,
+            flowActivityList: flowActivityList,
+            activityDetailList: activityDetailList,
+        }
     }
 
 
@@ -499,6 +629,76 @@ class FlowVariant {
                     continue
                 }
                 console.log("3")
+            }
+        }
+    }
+
+
+    async handleInsertVariantMap(insertVariantMap, newCaseMap, oldCaseMap) {
+        for (const flowVariant in insertVariantMap) {
+            if (insertVariantMap.hasOwnProperty(flowVariant)) {
+                let variant = insertVariantMap[flowVariant]
+                if (!variant.insert) {
+                    continue
+                }
+                // 变体活动表
+                for (let i = 0; i < variant.path_names.length; i++) {
+                    let caseActivityItem = {
+                        flowCode: this.flowCode,
+                        flowVariant: flowVariant,
+                        activity: variant.path_names[i],
+                        sequence: i,
+                    }
+                    this.caseActivityList.push(caseActivityItem)
+                }
+
+                // 变体案例表
+                for (let i = 0; i < variant.flowCaseIdList.length; i++) {
+                    let flowCaseId = variant.flowCaseIdList[i];
+                    let flowCase = this.caseMap[flowCaseId];
+                    let variantCaseItem = {
+                        flowCode: this.flowCode,
+                        flowVariant: flowVariant,
+                        flowCase: flowCase.flowCase,
+                        startActivity: flowCase.path[0].activity,
+                        endActivity: flowCase.path[flowCase.path.length - 1].activity,
+                        startTime: flowCase.path[0].activityTime,
+                        endTime: flowCase.path[flowCase.path.length - 1].activityTime,
+                        caseTime: flowCase.time,
+                        isReWork: flowCase.isReWork
+                    }
+                    this.variantCaseList.push(variantCaseItem)
+
+                    // 活动详情表
+                    for (let j = 0; j < flowCase.path.length; j++) {
+                        let nextIndex = j + 1;
+                        let activityItem = flowCase.path[j];
+                        activityItem.flowCode = this.flowCode;
+                        activityItem.flowVariant = flowVariant;
+                        if (nextIndex === flowCase.path.length) {
+                            activityItem.endActivity = null;
+                            activityItem.endTime = null;
+                        } else {
+                            activityItem.endActivity = flowCase.path[nextIndex].activity;
+                            activityItem.endTime = flowCase.path[nextIndex].activityTime;
+                        }
+                        this.activityDetailList.push(activityItem);
+                    }
+                }
+
+                // 流程变体表
+                let item = {
+                    flowCode: this.flowCode,
+                    flowVariant: flowVariant,
+                    flowCaseCount: variant.flowCaseCount,
+                    maxFlowCase: variant.maxFlowCase,
+                    maxTime: variant.maxTime,
+                    minFlowCase: variant.minFlowCase,
+                    minTime: variant.minTime,
+                    avgTime: variant.avgTime,
+                }
+                this.flowVariantList.push(item)
+
             }
         }
     }
@@ -577,11 +777,11 @@ class FlowVariant {
 
 
     // 重命名变体名称
-    _reNameVariantName() {
-        for (const variantMapKey in this.variantMap) {
-            if (this.variantMap.hasOwnProperty(variantMapKey) && !this.variantMap_[variantMapKey]) {
-                this.variantMap[preStr + this.index] = this.variantMap[variantMapKey];
-                delete this.variantMap[variantMapKey];
+    _reNameVariantName(variantMap, variantMap_) {
+        for (const variantMapKey in variantMap) {
+            if (variantMap.hasOwnProperty(variantMapKey) && !variantMap_[variantMapKey]) {
+                variantMap[preStr + this.index] = variantMap[variantMapKey];
+                delete variantMap[variantMapKey];
                 this.index++;
             }
         }
