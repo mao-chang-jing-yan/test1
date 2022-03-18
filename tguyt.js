@@ -1,2 +1,1 @@
-var a = require("./c.json")
-console.log(Object.keys(a))
+console.log(([1,2] +","+ [2,3]).split(","))
